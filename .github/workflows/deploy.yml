@@ -1,0 +1,37 @@
+name: Deploy site
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['README.md', '.github/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+      - name: Deploy this site
+        env:
+          DEPLOY_TARGET: ${{ secrets.DEPLOY_TARGET }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          credentials=$(mktemp -d)
+          trap 'rm -rf -- "$credentials"' EXIT
+          umask 077
+          printf '%s\n' "$DEPLOY_KEY" >"$credentials/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" >"$credentials/known_hosts"
+          git archive --format=tar.gz "$GITHUB_SHA" |
+            ssh -T -i "$credentials/key" -o IdentitiesOnly=yes -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$credentials/known_hosts" \
+              -o ConnectTimeout=15 -o ServerAliveInterval=15 "$DEPLOY_TARGET" \
+              "deploy zimbabwe $GITHUB_RUN_NUMBER"
