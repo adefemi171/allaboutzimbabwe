@@ -1,0 +1,8 @@
+**/._*
+**/.DS_Store
+scripts
+node_modules
+dist
+.next
+.github
+README.md

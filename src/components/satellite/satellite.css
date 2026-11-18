@@ -1,0 +1,812 @@
+/*
+ * The satellite page (components/satellite/SatellitePage.tsx), brought over
+ * from All About Netherlands. The page script fills in the lists, so these
+ * are plain global rules, every one under .sat or, for the two dialogs,
+ * under .scene.
+ */
+
+.sat,
+.scene {
+  /* What the rules below ask for and the site's own palette (app/globals.css) lacks. */
+  --ink-700: #1d211d;
+  --link: var(--water);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* The header is not laid over this page, so nothing has to clear it. */
+  --header-offset: 0px;
+  --sat-height: calc(100dvh - var(--header));
+  /* Room for a phone browser's toolbar, which lies over the foot of the page. */
+  --browser-bottom: 0px;
+}
+@media (max-width: 720px) {
+  .sat {
+    --browser-bottom: 3.5rem;
+  }
+  @supports (-webkit-touch-callout: none) {
+    .sat {
+      --browser-bottom: 4.25rem;
+    }
+  }
+}
+
+/* The reference site's base styles, which Tailwind's reset takes away here. */
+.sat h1,
+.sat h2,
+.sat h3,
+.scene h2 {
+  margin: 0;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.sat p,
+.scene p {
+  text-wrap: pretty;
+}
+.sat a,
+.scene a {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+.sat a:hover,
+.scene a:hover {
+  text-decoration-thickness: 2px;
+}
+.sat button:focus-visible,
+.sat a:focus-visible,
+.sat canvas:focus-visible,
+.sat input[type="checkbox"]:focus-visible,
+.scene button:focus-visible,
+.scene a:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+@media (max-width: 560px) {
+  .sat {
+    font-size: 1rem;
+  }
+}
+
+.sat {
+  position: relative;
+  /* The site's header stands above the page, and takes its height from the screen. */
+  min-height: var(--sat-height);
+  display: grid;
+  grid-template-columns: minmax(18rem, 24rem) 1fr;
+  gap: 0;
+  background: var(--ink-900);
+  color: var(--text);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+.sat__stage {
+  order: 2;
+  display: flex;
+  flex-direction: column;
+  height: var(--sat-height);
+  min-width: 0;
+}
+.sat__globe {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: radial-gradient(ellipse at 40% 35%, #1a1e1a 0%, var(--ink-900) 70%);
+}
+.sat__globe canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+.sat__globe canvas:active {
+  cursor: grabbing;
+}
+
+.sat__panel {
+  order: 1;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-height: var(--sat-height);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--header-offset) + 1.1rem) 1.15rem calc(1.25rem + var(--safe-bottom));
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--ink-800) 92%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.sat__intro h1 {
+  margin-top: 0.35rem;
+  font-size: clamp(1.55rem, 2.4vw, 2rem);
+  line-height: 1.15;
+}
+.sat__lede {
+  margin-top: 0.65rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.sat__picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.sat__picks button {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.35em 0.7em 0.3em;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sat__picks button:hover {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+.sat__card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1rem 1.05rem 1.05rem;
+  background: color-mix(in srgb, var(--ink-900) 55%, transparent);
+}
+.sat__report h2 {
+  margin-top: 0.5rem;
+  font-size: 1.3rem;
+  line-height: 1.25;
+}
+.sat__report h2:empty,
+.sat__summary:empty {
+  display: none;
+}
+
+/* The pictures, one at a time. */
+.sat__gallery {
+  margin-top: 1rem;
+}
+.sat__gallery[hidden] {
+  display: none;
+}
+.sat__gallery-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+.sat__gallery-bar p {
+  margin: 0 0.2rem 0 auto;
+  color: var(--muted);
+}
+.sat__tabs {
+  display: flex;
+  gap: 1px;
+}
+.sat__gallery-bar button,
+.sat__caption button {
+  display: grid;
+  place-items: center;
+  min-width: 2rem;
+  min-height: 2rem;
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0.3em 0.6em 0.25em;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sat__tabs button[hidden] {
+  display: none;
+}
+.sat__tabs button[aria-pressed="true"] {
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+.sat__picture {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: #0a0c0f;
+  color: var(--muted);
+  cursor: zoom-in;
+}
+/* The pictures are square. The middle of one shows, where the place is. */
+.sat__square {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  aspect-ratio: 1;
+  translate: 0 -50%;
+}
+.sat__square canvas,
+.sat__square img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.sat__square [hidden] {
+  display: none;
+}
+.sat__pin {
+  position: absolute;
+  width: 1.3rem;
+  height: 1.3rem;
+  translate: -50% -50%;
+  border: 2px solid var(--signal);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+}
+.sat__tag {
+  position: absolute;
+  left: 0.5rem;
+  top: 0.5rem;
+  padding: 0.2rem 0.45rem 0.1rem;
+  border-radius: 3px;
+  background: rgb(8 12 16 / 0.8);
+  color: #e9e5db;
+}
+.sat__caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.55rem;
+}
+.sat__caption p {
+  display: grid;
+  gap: 0.1rem;
+  margin: 0;
+  min-width: 0;
+  font-size: 0.86rem;
+}
+.sat__caption span {
+  color: var(--muted);
+}
+.sat__lapse {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem 0.5rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+.sat__lapse:hover {
+  border-color: var(--signal);
+}
+.sat__lapse span {
+  color: var(--muted);
+}
+
+/* The week on a strip under the globe. */
+.sat__timeline {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.9rem;
+  padding: 0.6rem 1.1rem calc(0.45rem + var(--safe-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--ink-800);
+}
+.sat__timeline[hidden] {
+  display: none;
+}
+.sat__timeline canvas {
+  display: block;
+  width: 100%;
+  height: 5.5rem;
+  min-width: 0;
+  touch-action: pan-y;
+}
+/* Four rows over the names of the days, as the canvas draws them. */
+.sat__rows {
+  display: grid;
+  grid-template-rows: repeat(4, 1fr);
+  align-items: center;
+  height: calc(5.5rem - 16px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sat__row span {
+  margin-left: 0.4rem;
+  color: var(--text);
+}
+.sat__row--watched {
+  color: var(--signal);
+}
+.sat__summary {
+  margin-top: 0.55rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.sat__block {
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+.sat__block h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sat__list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sat__note {
+  margin: 0.4rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.sat__note[hidden] {
+  display: none;
+}
+.sat__block h3:not(:first-child) {
+  margin-top: 1.1rem;
+}
+
+.sat__progress {
+  display: block;
+  width: 100%;
+  height: 0.3rem;
+  margin-top: 0.5rem;
+  accent-color: var(--signal);
+}
+.sat__progress[hidden] {
+  display: none;
+}
+
+.sat__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+.sat__filters button {
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 0.3em 0.75em 0.25em;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sat__filters button[hidden] {
+  display: none;
+}
+.sat__filters button[aria-pressed="true"] {
+  border-color: var(--signal);
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+.sat__filters span {
+  opacity: 0.7;
+  font-weight: 400;
+}
+
+/* On the globe: the clock, the pass that is showing, and the controls. */
+.sat__clock {
+  position: absolute;
+  left: 1.1rem;
+  top: calc(var(--header-offset) + 0.6rem);
+  margin: 0;
+  padding: 0.3rem 0.6rem 0.2rem;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ink-800) 85%, transparent);
+  pointer-events: none;
+}
+.sat__clock:empty {
+  display: none;
+}
+.sat__pass {
+  position: absolute;
+  left: 1.1rem;
+  bottom: 1.1rem;
+  width: min(21rem, calc(100% - 2.2rem));
+  background: color-mix(in srgb, var(--ink-800) 90%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.3);
+}
+.sat__pass h2 {
+  margin-top: 0.3rem;
+  font-size: 1.25rem;
+}
+.sat__pass dl {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.8rem 0 0;
+}
+.sat__pass dd {
+  margin: 0.1rem 0 0;
+  font-size: 0.93rem;
+  font-weight: 600;
+}
+.sat__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.9rem;
+}
+.sat__actions button,
+.sat__zoom button {
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0.45em 0.8em 0.35em;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sat__actions button[hidden] {
+  display: none;
+}
+.sat__actions .is-main {
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+.sat__tools {
+  position: absolute;
+  right: 1.1rem;
+  bottom: 1.1rem;
+  display: grid;
+  justify-items: end;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+  pointer-events: none;
+}
+.sat__tools > * {
+  pointer-events: auto;
+}
+.sat__legend {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0.5rem 0.65rem 0.4rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--ink-800) 85%, transparent);
+  list-style: none;
+  color: var(--muted);
+}
+.sat__dot::before {
+  content: "";
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.45rem;
+  border-radius: 50%;
+  background: #8fa3b5;
+}
+/* The colours of the dots in src/satellite/globe.ts. */
+.sat__dot--imaging::before {
+  background: #ffd200;
+}
+.sat__dot--radar::before {
+  background: #ff7a59;
+}
+.sat__dot--weather::before {
+  background: #62b4e8;
+}
+.sat__dot--crew::before {
+  background: #fff;
+}
+.sat__day {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.65rem 0.3rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--ink-800) 85%, transparent);
+  font-weight: 600;
+  cursor: pointer;
+}
+.sat__day input {
+  margin: 0;
+  accent-color: var(--signal);
+}
+.sat__zoom {
+  display: grid;
+  gap: 1px;
+}
+.sat__zoom button {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  background: color-mix(in srgb, var(--ink-800) 90%, transparent);
+}
+.sat__tip {
+  position: fixed;
+  z-index: 6;
+  margin: 0;
+  padding: 0.25rem 0.5rem 0.15rem;
+  translate: -50% calc(-100% - 0.7rem);
+  border-radius: 3px;
+  background: var(--ink-700);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.sat__item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.sat__item:hover,
+.sat__item:focus-visible {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.sat__item.is-active {
+  background: color-mix(in srgb, var(--signal) 16%, transparent);
+}
+.sat__badge {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+.sat__badge--watched {
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+.sat__badge--likely {
+  color: var(--signal);
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.sat__meta {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.sat__meta strong {
+  font-size: 0.92rem;
+}
+.sat__meta span {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.sat__credit {
+  margin-top: 1.1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.sat__credit a {
+  color: var(--link);
+}
+
+@media (max-width: 900px) {
+  /*
+   * Let the page itself scroll. A min-height + 1fr grid row on Safari
+   * locks the panel into a short clip and the pass list cannot move.
+   */
+  .sat {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: auto;
+  }
+  .sat__stage {
+    order: 1;
+    height: auto;
+  }
+  .sat__globe {
+    flex: none;
+    height: min(50dvh, 28rem);
+  }
+  /* The page scrolls here, and a swipe up or down on the globe scrolls it too.
+     Sideways the globe still turns, and two fingers still zoom. */
+  .sat__globe canvas {
+    touch-action: pan-y;
+  }
+  .sat__timeline {
+    grid-template-columns: 1fr;
+    gap: 0.3rem;
+    padding: 0.5rem 0.6rem 0.4rem;
+  }
+  .sat__timeline canvas {
+    height: 4.25rem;
+  }
+  .sat__rows {
+    display: flex;
+    gap: 0.9rem;
+    height: auto;
+  }
+  /* Less to scroll past on the way to the pictures. */
+  .sat__legend,
+  .sat__lede {
+    display: none;
+  }
+  .sat__pass {
+    left: 0.6rem;
+    bottom: 0.6rem;
+    width: calc(100% - 4.4rem);
+    padding: 0.7rem 0.8rem;
+  }
+  .sat__pass dl {
+    display: none;
+  }
+  .sat__tools {
+    right: 0.6rem;
+    bottom: 0.6rem;
+  }
+  .sat__day span {
+    display: none;
+  }
+  .sat__panel {
+    order: 2;
+    flex: none;
+    max-height: none;
+    padding-top: 1.1rem;
+    overflow: visible;
+    overscroll-behavior: auto;
+    border-right: 0;
+    border-top: 1px solid var(--line);
+    padding-bottom: calc(1.25rem + var(--safe-bottom) + var(--browser-bottom, 0px));
+  }
+}
+
+/* A picture shown large, and a place through the years: two dialogs of one make. */
+.scene {
+  width: min(46rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ink-800);
+  color: var(--text);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.45);
+}
+.scene::backdrop {
+  background: rgb(0 0 0 / 0.6);
+}
+.scene__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+.scene button {
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0.35em 0.7em;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.scene__views {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.6rem 0.9rem;
+}
+.scene__views[hidden] {
+  display: none;
+}
+.scene__views button[aria-pressed="true"] {
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+.scene__picture {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 12rem;
+  background: #0a0c0f;
+}
+.scene__picture img {
+  display: block;
+  width: 100%;
+  max-height: min(68dvh, 46rem);
+  object-fit: contain;
+}
+/* Square, like the close-up, so the ring can be placed on it. */
+.scene__closeup {
+  position: relative;
+  width: min(100%, 68dvh, 46rem);
+  aspect-ratio: 1;
+}
+.scene__closeup[hidden] {
+  display: none;
+}
+.scene__closeup canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* The place itself: a ring, so the spot under it stays visible. */
+.scene__pin {
+  position: absolute;
+  width: 1.5rem;
+  height: 1.5rem;
+  translate: -50% -50%;
+  border: 2px solid var(--signal);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+  pointer-events: none;
+}
+.scene__note {
+  margin: 0;
+  padding: 0.65rem 0.9rem 0.75rem;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.scene__note a {
+  color: var(--link);
+}
+.scene__views {
+  flex-wrap: wrap;
+}
+.scene__views button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

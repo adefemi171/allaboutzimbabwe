@@ -1,0 +1,200 @@
+@import "tailwindcss";
+
+:root {
+  --ink-900: #0c0e0c;
+  --ink-800: #151815;
+  --signal: #ffd200;
+  --signal-strong: #ffdf4d;
+  --signal-ink: #0c0e0c;
+  --water: #62b4e8;
+
+  /* Flag of Zimbabwe: green, gold, red, black. */
+  --flag-green: #319208;
+  --flag-gold: #ffd200;
+  --flag-red: #de2010;
+  --flag-black: #000;
+  --green: #2b7f07;
+  --green-strong: #236a05;
+  --green-text: #5cc93a;
+  --red-text: #ff5a47;
+
+  --bg: var(--ink-900);
+  --text: #e9e5db;
+  --muted: #a4aaa2;
+  --line: #2b302b;
+  --mark: #2c1311;
+  --radius: 4px;
+  --header: 4rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: calc(var(--header) + 1rem);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+@media (max-width: 820px) {
+  .nld-btn,
+  .nld-btn-quiet {
+    min-height: 2.75rem;
+    padding-inline: 1.1em;
+  }
+}
+
+/* Resets to the sans face inside a .font-mono-tech container. */
+.font-display {
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+.font-mono-tech,
+.mono {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+.mono {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mono:not([class*="text-"]) {
+  color: var(--muted);
+}
+
+.nld-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.68em 1.15em 0.58em;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--green);
+  color: #fff;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.nld-btn:hover {
+  background: var(--green-strong);
+}
+
+.nld-btn-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.68em 1.15em 0.58em;
+  border: 1px solid color-mix(in srgb, var(--text) 32%, transparent);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.nld-btn-quiet:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border-color: color-mix(in srgb, var(--text) 58%, transparent);
+}
+
+/* In the components layer so Tailwind utilities on the same element still win. */
+@layer components {
+  .nld-input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0.25rem;
+    background: var(--ink-800);
+    color: var(--text);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+  .nld-input::placeholder {
+    color: var(--muted);
+  }
+  .nld-input:focus {
+    border-color: var(--signal);
+    outline-style: none;
+  }
+
+  .nld-link {
+    color: var(--green-text);
+    text-decoration-line: underline;
+    text-underline-offset: 0.18em;
+  }
+
+  .nld-callout {
+    border-left: 4px solid var(--flag-red);
+    background: var(--mark);
+  }
+}
+
+/* The flag's bands, top to bottom, as a thin ribbon under the header. */
+.zw-stripe {
+  background: linear-gradient(
+    180deg,
+    var(--flag-green) 0 20%,
+    var(--flag-gold) 0 40%,
+    var(--flag-red) 0 60%,
+    var(--flag-gold) 0 80%,
+    var(--flag-green) 0
+  );
+}
+
+.sea-dots {
+  background-image: radial-gradient(rgba(164, 170, 162, 0.12) 1.5px, transparent 1.5px);
+  background-size: 22px 22px;
+}
+
+@keyframes zw-ping {
+  from {
+    scale: 1;
+    opacity: 0.9;
+  }
+  to {
+    scale: 3.2;
+    opacity: 0;
+  }
+}
+
+@keyframes zw-nudge {
+  50% {
+    translate: 0 4px;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0c0e0c;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b302b;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3d443d;
+}
