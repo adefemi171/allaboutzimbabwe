@@ -12,12 +12,13 @@ import { storePassTrack } from "../pass-track";
 import { defaultWindow, watchers } from "../passes";
 import { findPasses } from "../pool";
 import { LABEL_COPY } from "../profile";
-import { describeScene, searchScenes } from "../scenes";
+import { describeScene, searchWeekOfScenes } from "../scenes";
 import { formatAway, formatClock, formatWhen } from "../time";
 import { ROWS, Timeline } from "../timeline";
 import { trackOfPass } from "../track";
 import type { GpRecord, MatchedPass, PassLabel, SatKind } from "../types";
 import { Gallery } from "./gallery";
+import { ReplayCapture } from "../replay-capture";
 import { cityMapFor, findPlace, inZimbabwe, type WatchPlace } from "./places";
 import { closeScene, openScene } from "./scene-dialog";
 import { closeTimelapse, openTimelapse } from "./timelapse";
@@ -145,6 +146,11 @@ export function startSatellitePage(root: HTMLElement): () => void {
     tip.style.top = `${y}px`;
   };
 
+  const replayCapture = new ReplayCapture($<HTMLElement>("[data-sat-replay-capture]")!);
+  const replayHud = $<HTMLElement>("[data-sat-replay]");
+  const replayProgress = $<HTMLInputElement>("[data-sat-replay-progress]");
+  const replayPlayback = $<HTMLButtonElement>("[data-sat-replay-playback]");
+  const replayFollow = $<HTMLButtonElement>("[data-sat-replay-follow]");
   const globe = new SatelliteGlobe(canvas, {
     onHover(hovered) {
       hint(
@@ -153,9 +159,22 @@ export function startSatellitePage(root: HTMLElement): () => void {
         hovered?.y,
       );
     },
-    onTime(date, live) {
+    onTime(date, live, frame) {
       const what = live ? "Now" : date.getTime() > Date.now() ? "Still to come" : "Replay";
       setText("[data-sat-clock]", `${what} · ${formatClock(date)}`);
+      if (replayHud) replayHud.hidden = !frame;
+      if (frame) {
+        replayCapture.update(frame.scan, frame.scanDirection);
+        if (replayProgress) {
+          replayProgress.value = String(Math.round(frame.progress * 1000));
+          replayProgress.setAttribute("aria-valuetext", formatClock(date));
+        }
+        const playbackLabel = frame.playing ? "Pause" : "Play";
+        if (replayPlayback && replayPlayback.textContent !== playbackLabel) replayPlayback.textContent = playbackLabel;
+        replayFollow?.setAttribute("aria-pressed", String(frame.following));
+        setText("[data-sat-replay-phase]", frame.phase);
+        setText("[data-sat-replay-altitude]", `${Math.round(frame.altitudeKm)} km up`);
+      }
     },
     onPick(lat, lon) {
       const spot: Focus = { lat, lon, label: coordinates(lat, lon) };
@@ -173,9 +192,9 @@ export function startSatellitePage(root: HTMLElement): () => void {
     onHover: (pass, x, y) => hint(pass && `${pass.name} · ${formatWhen(pass.time)}`, x, y),
   });
   const gallery = new Gallery(pictures, {
-    onOpen: (shot) => focus && openScene(shot.scene, focus),
-    onReplay: (shot) => {
-      select(shot);
+    onOpen: (scene) => focus && openScene(scene, focus),
+    onReplay: (pass, selectPhoto) => {
+      select(pass, selectPhoto);
       canvas.scrollIntoView({ block: "nearest", behavior: "smooth" });
     },
   });
@@ -197,11 +216,12 @@ export function startSatellitePage(root: HTMLElement): () => void {
 
   // --------------------------------------------------------- one pass --
 
-  const select = (pass: MatchedPass | null) => {
+  const select = (pass: MatchedPass | null, selectPhoto = true) => {
     selected = pass;
+    replayCapture.set(pass, focus);
     globe.showPass(pass);
     timeline.select(pass?.id ?? null);
-    if (pass) gallery.show(pass);
+    if (pass && selectPhoto) gallery.show(pass);
     for (const item of $$("[data-pass-id]")) {
       item.classList.toggle("is-active", item.dataset.passId === pass?.id);
     }
@@ -210,7 +230,6 @@ export function startSatellitePage(root: HTMLElement): () => void {
     setText("[data-sat-pass-name]", pass.name);
     setText("[data-sat-pass-label]", `${LABEL_COPY[pass.label]} · ${KIND_COPY[pass.kind]}`);
     setText("[data-sat-pass-when]", `${formatWhen(pass.time)} · ${formatAway(pass.time)}`);
-    setText("[data-sat-pass-height]", `${Math.round(pass.altitudeKm)} km up`);
     setText(
       "[data-sat-pass-near]",
       `${Math.round(pass.angleDeg * KM_PER_DEGREE)} km from straight overhead`,
@@ -229,6 +248,10 @@ export function startSatellitePage(root: HTMLElement): () => void {
     listen,
   );
   $("[data-sat-pass-replay]")?.addEventListener("click", () => globe.replayPass(), listen);
+  replayProgress?.addEventListener("input", () => globe.seekReplay(Number(replayProgress.value) / 1000), listen);
+  replayPlayback?.addEventListener("click", () => globe.toggleReplayPlayback(), listen);
+  $("[data-sat-replay-closest]")?.addEventListener("click", () => globe.seekClosestApproach(), listen);
+  replayFollow?.addEventListener("click", () => globe.toggleReplayFollow(), listen);
   $("[data-sat-pass-now]")?.addEventListener("click", () => select(null), listen);
   // Where the place lies in a 3D city map, that map can draw the pass.
   $("[data-sat-pass-map]")?.addEventListener(
@@ -345,7 +368,9 @@ export function startSatellitePage(root: HTMLElement): () => void {
 
     report.hidden = false;
     setText("[data-sat-where]", place.label);
-    setText("[data-sat-headline]", "");
+    for (const button of $$<HTMLButtonElement>("[data-sat-pick]")) {
+      button.setAttribute("aria-pressed", String(button.dataset.satPick === place.id));
+    }
     setText("[data-sat-summary]", "");
     busy("Looking up orbits…");
     matched = [];
@@ -373,33 +398,28 @@ export function startSatellitePage(root: HTMLElement): () => void {
       }
       const records = catalog.search;
 
-      const [passes, scenes] = await Promise.all([
+      const [passes, archive] = await Promise.all([
         findPasses(records, place.lat, place.lon, {
           window: span,
           signal,
           onProgress: (done, total) => busy("Checking a week of orbits…", done / total),
         }),
         // Without the archive there are still the passes.
-        searchScenes(place.lat, place.lon, { signal }).catch(() => null),
+        searchWeekOfScenes(place.lat, place.lon, signal).catch(() => null),
       ]);
       if (signal.aborted) return;
 
-      matched = matchPasses(passes, scenes ?? [], records);
+      matched = matchPasses(passes, archive?.scenes ?? [], records);
       addDaily(matched, place.lat, place.lon);
       const past = matched.filter((pass) => !pass.upcoming);
-      const photos = matched.filter((pass) => pass.scene).length;
+      const photos = gallery.set(matched, place, archive?.scenes, archive?.clearLook);
       const upcoming = matched.length - past.length;
       const satellites = new Set(past.map((pass) => pass.noradId)).size;
       busy("");
       setText(
-        "[data-sat-headline]",
-        `In the last 7 days, ${satellites} satellites passed over ${place.label}.`,
-      );
-      setText(
         "[data-sat-summary]",
-        `${photos} of their pictures of it are public` +
-          (scenes ? "" : " (the Sentinel and Landsat archive could not be reached)") +
-          (upcoming ? `, and ${upcoming} more passes come in the next 2 days.` : "."),
+        `${satellites} satellites in the past 7 days · ${photos} public images · ${upcoming} upcoming passes.` +
+          (archive ? "" : " The detailed imagery archive is temporarily unavailable."),
       );
       for (const label of ROWS) {
         setText(
@@ -407,7 +427,6 @@ export function startSatellitePage(root: HTMLElement): () => void {
           String(past.filter((pass) => pass.label === label).length),
         );
       }
-      gallery.set(matched, place);
 
       const always = watchers(records, place.lat, place.lon).map((profile) => profile.name);
       setText(

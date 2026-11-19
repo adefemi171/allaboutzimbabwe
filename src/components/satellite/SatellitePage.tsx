@@ -24,7 +24,7 @@ const ROWS = [
 ];
 const TABS = [
   ["all", "All"],
-  ["detail", "Detailed"],
+  ["detail", "Detail"],
   ["weather", "Weather"],
 ];
 const LEGEND = [
@@ -50,16 +50,55 @@ export function SatellitePage() {
     <>
       <main id="main" className="sat" ref={root}>
         <div className="sat__stage">
-          <div className="sat__globe">
-            <canvas
-              data-sat-canvas
-              tabIndex={0}
-              role="application"
-              aria-label="The Earth with the satellites around it. Arrow keys turn it, plus and minus zoom. Press a spot to see which satellites passed over it."
-            />
+          <div className="sat__viewport">
+            <div className="sat__globe">
+              <canvas
+                data-sat-canvas
+                tabIndex={0}
+                role="application"
+                aria-label="The Earth with the satellites around it. Arrow keys turn it, plus and minus zoom. Press a spot to see which satellites passed over it."
+              />
 
-            <p className="sat__clock mono" data-sat-clock />
+              <p className="sat__clock mono" data-sat-clock />
 
+              <figure className="sat__capture" data-sat-replay-capture hidden>
+                <canvas role="img"></canvas>
+                <figcaption></figcaption>
+              </figure>
+
+              <div className="sat__tools">
+                <ul className="sat__legend" aria-label="What the dots are">
+                  {LEGEND.map(([kind, label]) => (
+                    <li key={kind} className={`sat__dot sat__dot--${kind}`}>
+                      {label}
+                    </li>
+                  ))}
+                </ul>
+                <label className="sat__day">
+                  <input type="checkbox" data-sat-day defaultChecked aria-label="Show today’s clouds on the globe" />
+                  <span>Clouds of the day</span>
+                </label>
+                <div className="sat__zoom" role="group" aria-label="Zoom">
+                  <button type="button" data-sat-zoom="in" aria-label="Zoom in">
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                      <path
+                        d="M8 3v10M3 8h10"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                  <button type="button" data-sat-zoom="out" aria-label="Zoom out">
+                    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M3 8h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <p className="sat__tip mono" data-sat-tip hidden />
+            </div>
             <article className="sat__pass sat__card" data-sat-pass hidden>
               <p className="mono" data-sat-pass-label />
               <h2 data-sat-pass-name />
@@ -69,20 +108,29 @@ export function SatellitePage() {
                   <dd data-sat-pass-when />
                 </div>
                 <div>
-                  <dt className="mono">Height</dt>
-                  <dd data-sat-pass-height />
-                </div>
-                <div>
                   <dt className="mono">Passed</dt>
                   <dd data-sat-pass-near />
                 </div>
               </dl>
+              <div className="sat__replay" data-sat-replay hidden>
+                <p className="sat__replay-status">
+                  <strong data-sat-replay-phase></strong>
+                  <span data-sat-replay-altitude></span>
+                </p>
+                <input className="sat__replay-scrubber" type="range" min="0" max="1000" defaultValue={0} data-sat-replay-progress aria-label="Replay time" />
+                <div className="sat__replay-controls">
+                  <button type="button" data-sat-replay-playback>Pause</button>
+                  <button type="button" data-sat-replay-closest>Closest approach</button>
+                  <button type="button" data-sat-replay-follow aria-pressed="false">Follow spacecraft</button>
+                </div>
+                <p className="sat__replay-scale">Illustrated spacecraft, enlarged for visibility</p>
+              </div>
               <p className="sat__actions">
                 <button type="button" className="is-main" data-sat-pass-photo>
                   See the photo
                 </button>
                 <button type="button" data-sat-pass-replay>
-                  Replay
+                  Restart
                 </button>
                 <button type="button" data-sat-pass-now>
                   Back to now
@@ -92,39 +140,6 @@ export function SatellitePage() {
                 </button>
               </p>
             </article>
-
-            <div className="sat__tools">
-              <ul className="sat__legend" aria-label="What the dots are">
-                {LEGEND.map(([kind, label]) => (
-                  <li key={kind} className={`sat__dot sat__dot--${kind}`}>
-                    {label}
-                  </li>
-                ))}
-              </ul>
-              <label className="sat__day">
-                <input type="checkbox" data-sat-day defaultChecked />
-                <span>Clouds of the day</span>
-              </label>
-              <div className="sat__zoom" role="group" aria-label="Zoom">
-                <button type="button" data-sat-zoom="in" aria-label="Zoom in">
-                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                    <path
-                      d="M8 3v10M3 8h10"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-                <button type="button" data-sat-zoom="out" aria-label="Zoom out">
-                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                    <path d="M3 8h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <p className="sat__tip mono" data-sat-tip hidden />
           </div>
 
           <section
@@ -147,12 +162,9 @@ export function SatellitePage() {
 
         <div className="sat__panel">
           <header className="sat__intro">
-            <p className="mono">Satellite view</p>
-            <h1>Satellites over Zimbabwe this week</h1>
+            <h1>Satellite explorer</h1>
             <p className="sat__lede">
-              Pick a place, search for a street, or press a spot on the globe. The page replays
-              public orbit data for the last seven days, lists every pass that could have seen the
-              place, and shows the pictures that were published.
+            Search for a place or pick one on the globe to see imagery and satellite passes.
             </p>
           </header>
 
@@ -183,17 +195,17 @@ export function SatellitePage() {
           </div>
 
           <section className="sat__report sat__card" data-sat-report hidden>
-            <p className="mono" data-sat-where />
+            <h2 data-sat-where />
             <p className="mono" data-sat-status role="status">
               Looking up orbits…
             </p>
             <progress className="sat__progress" data-sat-progress max={1} value={0} />
-            <h2 data-sat-headline />
             <p className="sat__summary" data-sat-summary />
 
             <div className="sat__gallery" data-sat-gallery hidden>
+              <h3 className="sat__gallery-title">Satellite imagery</h3>
               <div className="sat__gallery-bar">
-                <div className="sat__tabs" role="group" aria-label="Which pictures to show">
+                <div className="sat__tabs" role="group" aria-label="Image type">
                   {TABS.map(([tab, label]) => (
                     <button key={tab} type="button" data-gallery-tab={tab} aria-pressed="false">
                       {label}
@@ -239,7 +251,9 @@ export function SatellitePage() {
                   <img data-gallery-img alt="" referrerPolicy="no-referrer" decoding="async" hidden />
                   <span className="sat__pin" data-gallery-pin hidden />
                 </span>
+                <span className="sat__picture-message" data-gallery-placeholder hidden />
                 <span className="sat__tag mono" data-gallery-tag />
+                <span className="sat__picture-action" aria-hidden="true">View larger ↗</span>
               </button>
               <div className="sat__caption">
                 <p>

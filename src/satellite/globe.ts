@@ -12,6 +12,7 @@ import * as THREE from "three";
 import { isLiteDevice } from "@/lib/device";
 import { GLOBE_LAYER, gibsPicture } from "./gibs";
 import { profileOf } from "./profile";
+import { ReplaySpacecraft } from "./replay-spacecraft";
 import { lookAt, placeEcef, toSatrec, type SatRec } from "./sgp4";
 import { subSolar } from "./sun";
 import { utcDay } from "./time";
@@ -24,6 +25,8 @@ const MAX_DIST = 12;
 /** A replay starts this long before the closest approach, and runs this fast. */
 const LEAD_MS = 4 * 60_000;
 const REPLAY_SPEED = 45;
+const DEPARTURE_MS = 2 * 60_000;
+const TRAIL_STEP_MS = 4_000;
 /** Half the size of the day's picture around the place, degrees. */
 const DAY_REACH = { lat: 11, lon: 18 };
 
@@ -44,11 +47,31 @@ export interface Hovered {
   y: number;
 }
 
+interface ReplayFrame {
+  progress: number;
+  phase: string;
+  altitudeKm: number;
+  playing: boolean;
+  following: boolean;
+  scan: number;
+  scanDirection: "down" | "up" | "left" | "right";
+}
+
+interface Replay {
+  from: number;
+  closest: number;
+  until: number;
+  cursor: number;
+  started: number | null;
+  playing: boolean;
+  scanDirection: ReplayFrame["scanDirection"];
+}
+
 export interface GlobeEvents {
   /** The pointer is on a satellite, or left it. */
   onHover(hovered: Hovered | null): void;
   /** The moment the globe shows, and whether that is the present. */
-  onTime(date: Date, live: boolean): void;
+  onTime(date: Date, live: boolean, frame?: ReplayFrame): void;
   /** A spot on the ground was clicked or tapped. */
   onPick(lat: number, lon: number): void;
 }
@@ -202,7 +225,16 @@ export class SatelliteGlobe {
   private dots: THREE.Points | null = null;
   private pixels = { value: 1 };
   private marker = new THREE.Group();
-  private track = line(0x62b4e8, 0.9);
+  private track = line(0x62b4e8, 0.46);
+  private trail = line(0xb5efff, 0.95);
+  private spacecraft = new ReplaySpacecraft();
+  private spacecraftNext = new THREE.Vector3();
+  private scanStrip = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1, 24, 1),
+    new THREE.MeshBasicMaterial({ color: 0x91e6ff, transparent: true, opacity: 0.72, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  private followReplay = false;
+  private reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   private drop = line(0xffd200, 0.7);
   private footprint = line(0xffd200, 0.95, true);
 
@@ -215,7 +247,7 @@ export class SatelliteGlobe {
   private view = { lat: -10, lon: 25, dist: 3.4 };
   private goal = { lat: -10, lon: 25, dist: 3.4 };
   /** A pass being replayed: the clock runs from `from` up to `until` and holds. */
-  private replay: { from: number; until: number; started: number } | null = null;
+  private replay: Replay | null = null;
   private lastMoved = 0;
   /** The moment the satellites were last drawn for. */
   private shown = NaN;
@@ -280,7 +312,9 @@ export class SatelliteGlobe {
       ),
     );
 
-    this.scene.add(this.stars(), this.marker, this.track, this.drop, this.footprint);
+    this.scene.add(this.stars(), this.marker, this.track, this.trail, this.drop, this.footprint, this.scanStrip, this.spacecraft);
+    this.scanStrip.visible = false;
+    this.scanStrip.frustumCulled = false;
     this.buildMarker();
     this.bindInput();
     this.observeSize();
@@ -314,6 +348,8 @@ export class SatelliteGlobe {
     this.cloudDay = this.dayKey = "";
     this.dropDay();
     for (const name of ["uDay", "uNight", "uClouds"]) this.earth.uniforms[name].value.dispose();
+    this.scene.remove(this.spacecraft);
+    this.spacecraft.dispose();
     this.scene.traverse((thing) => {
       const { geometry, material } = thing as THREE.Mesh;
       geometry?.dispose();
@@ -390,33 +426,56 @@ export class SatelliteGlobe {
   }
 
   /**
-   * Turn the clock to a pass and play the minutes up to its closest
-   * approach. Null goes back to the present.
+   * Play the approach, closest point and departure. Null returns to live time.
    */
   showPass(pass: Pass | null): void {
     this.selected = pass
       ? (this.satellites.find((satellite) => satellite.noradId === pass.noradId) ?? null)
       : null;
     const shown = !!this.selected;
-    this.track.visible = this.drop.visible = this.footprint.visible = shown;
+    this.track.visible = this.trail.visible = this.drop.visible = this.footprint.visible = shown;
+    this.spacecraft.visible = this.scanStrip.visible = false;
+    this.followReplay = shown && !this.reducedMotion.matches;
     if (!pass || !this.selected) {
       this.replay = null;
       this.loadDay(new Date(Date.now() - 86400000));
       return;
     }
 
-    const until = new Date(pass.time).getTime();
-    this.replay = { from: until - LEAD_MS, until, started: performance.now() };
+    const closest = Date.parse(pass.time);
+    const from = closest - LEAD_MS;
+    const until = closest + DEPARTURE_MS;
+
+    this.spacecraft.show(pass.noradId);
     // The path for a quarter of an hour either side, over the turning Earth.
     const place = placeEcef(this.place.lat, this.place.lon);
+    const before = lookAt(this.selected.satrec, new Date(closest - TRAIL_STEP_MS), place);
+    const after = lookAt(this.selected.satrec, new Date(closest + TRAIL_STEP_MS), place);
+    let scanDirection: ReplayFrame["scanDirection"] = "down";
+    if (before && after) {
+      const north = after.lat - before.lat;
+      const east = (((after.lon - before.lon + 540) % 360) - 180) * Math.cos(before.lat * RAD);
+      if (Math.abs(east) > Math.abs(north)) scanDirection = east > 0 ? "right" : "left";
+      else scanDirection = north > 0 ? "up" : "down";
+    }
+    this.replay = { from, closest, until, cursor: from, started: null, playing: true, scanDirection };
     const path: THREE.Vector3[] = [];
     for (let minutes = -14; minutes <= 14; minutes += 0.5) {
-      const look = lookAt(this.selected.satrec, new Date(until + minutes * 60_000), place);
+      const look = lookAt(this.selected.satrec, new Date(closest + minutes * 60_000), place);
       if (look) path.push(point(look.lat, look.lon, 1 + look.altitudeKm / EARTH_KM));
     }
     this.track.geometry.setFromPoints(path);
+
+    const traveled: THREE.Vector3[] = [];
+    for (let time = from; time <= until; time += TRAIL_STEP_MS) {
+      const look = lookAt(this.selected.satrec, new Date(time), place);
+      if (look) traveled.push(point(look.lat, look.lon, 1 + look.altitudeKm / EARTH_KM));
+    }
+    this.trail.geometry.dispose();
+    this.trail.geometry = new THREE.BufferGeometry().setFromPoints(traveled);
+    this.trail.geometry.setDrawRange(0, 0);
     // A pass still to come has no picture of its day yet.
-    if (!pass.upcoming) this.loadDay(new Date(until));
+    if (!pass.upcoming) this.loadDay(new Date(closest));
     this.goal = {
       lat: (this.place.lat + pass.lat) / 2,
       lon: this.place.lon + (((pass.lon - this.place.lon + 540) % 360) - 180) / 2,
@@ -424,9 +483,49 @@ export class SatelliteGlobe {
     };
   }
 
-  /** Play the selected pass again from the start. */
+  /** Restart the selected pass from its approach. */
   replayPass(): void {
-    if (this.replay) this.replay.started = performance.now();
+    if (!this.replay) return;
+    this.seekReplay(0);
+    this.replay.playing = true;
+  }
+
+  seekReplay(fraction: number): void {
+    const replay = this.replay;
+    if (!replay || !Number.isFinite(fraction)) return;
+    replay.cursor = THREE.MathUtils.lerp(replay.from, replay.until, THREE.MathUtils.clamp(fraction, 0, 1));
+    replay.started = null;
+    replay.playing = false;
+    this.shown = NaN;
+  }
+
+  seekClosestApproach(): void {
+    const replay = this.replay;
+    if (replay) this.seekReplay((replay.closest - replay.from) / (replay.until - replay.from));
+  }
+
+  toggleReplayPlayback(): void {
+    const replay = this.replay;
+    if (!replay) return;
+    if (!replay.playing && replay.cursor >= replay.until) {
+      this.replayPass();
+      return;
+    }
+    replay.cursor = this.clock(performance.now());
+    replay.playing = !replay.playing && replay.cursor < replay.until;
+    replay.started = null;
+    this.shown = NaN;
+  }
+
+  toggleReplayFollow(): void {
+    if (!this.replay) return;
+    this.setReplayFollow(!this.followReplay);
+  }
+
+  private setReplayFollow(follow: boolean): void {
+    if (this.followReplay === follow) return;
+    this.followReplay = follow;
+    this.shown = NaN;
   }
 
   /** Show or hide the weather satellite's clouds and picture of the day. */
@@ -595,6 +694,7 @@ export class SatelliteGlobe {
         pinch = now;
         return;
       }
+      if (dx || dy) this.setReplayFollow(false);
       // The ground under the pointer follows it, at any zoom.
       const perPixel = ((this.view.dist - 1) * 40) / this.canvas.clientHeight;
       this.goal.lon -= dx * perPixel;
@@ -640,6 +740,7 @@ export class SatelliteGlobe {
       const action = actions[event.key];
       if (!action || event.metaKey || event.ctrlKey || event.altKey) return;
       event.preventDefault();
+      if (event.key.startsWith("Arrow")) this.setReplayFollow(false);
       action();
     });
   }
@@ -708,9 +809,16 @@ export class SatelliteGlobe {
 
   /** The moment the globe shows: now, or a point in the replay. */
   private clock(now: number): number {
-    if (!this.replay) return Date.now();
-    const { from, until, started } = this.replay;
-    return Math.min(until, from + (now - started) * REPLAY_SPEED);
+    const replay = this.replay;
+    if (!replay) return Date.now();
+    if (!replay.playing) return replay.cursor;
+    replay.started ??= now;
+    const time = replay.cursor + (now - replay.started) * REPLAY_SPEED;
+    if (time < replay.until) return time;
+    replay.cursor = replay.until;
+    replay.started = null;
+    replay.playing = false;
+    return replay.cursor;
   }
 
   private moveSatellites(date: Date): void {
@@ -729,14 +837,46 @@ export class SatelliteGlobe {
   }
 
   /** The line from the selected satellite to the ground, and the ground it can see. */
-  private drawSelected(): void {
+  private drawSelected(time: number): void {
     const satellite = this.selected;
     if (!satellite) return;
     const { lat, lon, altitudeKm, halfAngleDeg } = satellite;
-    this.drop.geometry.setFromPoints([
-      point(lat, lon, 1 + altitudeKm / EARTH_KM),
-      point(lat, lon, 1.002),
-    ]);
+    const position = point(lat, lon, 1 + altitudeKm / EARTH_KM);
+    this.drop.geometry.setFromPoints([position, point(lat, lon, 1.002)]);
+    const next = lookAt(satellite.satrec, new Date(time + TRAIL_STEP_MS), placeEcef(this.place.lat, this.place.lon));
+    this.spacecraft.position.copy(position);
+    this.spacecraftNext.copy(next ? point(next.lat, next.lon, 1 + next.altitudeKm / EARTH_KM) : position);
+
+    if (this.followReplay) {
+      this.goal.lat = THREE.MathUtils.lerp(this.place.lat, lat, 0.58);
+      const delta = ((lon - this.place.lon + 540) % 360) - 180;
+      this.goal.lon = this.place.lon + delta * 0.58;
+    }
+
+    const scansGround = next && (satellite.kind === "imaging" || satellite.kind === "radar" || satellite.kind === "weather");
+    this.scanStrip.visible = Boolean(scansGround);
+    this.footprint.visible = !this.scanStrip.visible;
+    if (scansGround) {
+      const centre = point(lat, lon);
+      const along = point(next.lat, next.lon);
+      along.addScaledVector(centre, -along.dot(centre)).normalize();
+      const across = new THREE.Vector3().crossVectors(along, centre);
+      const width = Math.tan(halfAngleDeg * RAD);
+      const positions = this.scanStrip.geometry.getAttribute("position");
+      const corner = new THREE.Vector3();
+      for (let row = 0; row < 2; row++) {
+        for (let col = 0; col <= 24; col++) {
+          corner.copy(centre)
+            .addScaledVector(across, (col / 12 - 1) * width)
+            .addScaledVector(along, (row ? 1 : -1) * 0.007)
+            .normalize().multiplyScalar(1.005);
+          positions.setXYZ(row * 25 + col, corner.x, corner.y, corner.z);
+        }
+      }
+      positions.needsUpdate = true;
+      return;
+    }
+
     // A circle on the ground, the field of view around the point below.
     const centre = point(lat, lon);
     const east = new THREE.Vector3(0, 1, 0).cross(centre).normalize();
@@ -766,10 +906,29 @@ export class SatelliteGlobe {
       this.lastMoved = now;
       this.shown = time;
       this.moveSatellites(date);
-      this.drawSelected();
+      this.drawSelected(time);
       const sun = subSolar(date);
       this.sun.value.copy(point(sun.lat, sun.lon));
-      this.events.onTime(date, !this.replay);
+      const replay = this.replay;
+      if (replay && this.selected) {
+        const progress = THREE.MathUtils.clamp((time - replay.from) / (replay.until - replay.from), 0, 1);
+        const count = this.trail.geometry.getAttribute("position")?.count ?? 0;
+        this.trail.geometry.setDrawRange(0, Math.round(count * progress));
+        let phase = time < replay.closest ? "Approaching" : "Departing";
+        if (Math.abs(time - replay.closest) <= 25_000) phase = "Closest approach";
+        if (progress >= 1) phase = "Replay complete";
+        this.events.onTime(date, false, {
+          progress,
+          phase,
+          altitudeKm: this.selected.altitudeKm,
+          playing: replay.playing,
+          following: this.followReplay,
+          scan: THREE.MathUtils.clamp((time - replay.closest + 24_000) / 48_000, 0, 1),
+          scanDirection: replay.scanDirection,
+        });
+      } else {
+        this.events.onTime(date, true);
+      }
     }
 
     // Ease the camera towards its goal, the short way round.
@@ -780,6 +939,9 @@ export class SatelliteGlobe {
     view.dist *= Math.exp(Math.log(goal.dist / view.dist) * a);
     this.camera.position.copy(point(view.lat, view.lon, view.dist));
     this.camera.lookAt(0, 0, 0);
+    if (this.spacecraft.visible) {
+      this.spacecraft.pose(this.spacecraft.position, this.spacecraftNext, this.camera, this.canvas.clientHeight);
+    }
 
     const worn = this.showDay ? 1 : 0;
     const cloud = this.earth.uniforms.uCloud;

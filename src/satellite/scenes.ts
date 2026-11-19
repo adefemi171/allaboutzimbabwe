@@ -119,6 +119,32 @@ export async function searchScenes(
     : scenes;
 }
 
+/** Look back for a clear Sentinel image when the recent detail is clouded. */
+export async function searchWeekOfScenes(lat: number, lon: number, signal: AbortSignal) {
+  const end = new Date();
+  const scenes = await searchScenes(lat, lon, {
+    to: end,
+    signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+  });
+  if (scenes.some((scene) => scene.visual && (scene.cloudCover ?? 100) <= 25)) {
+    return { scenes, clearLook: null };
+  }
+
+  const day = 86_400_000;
+  const older = await searchScenes(lat, lon, {
+    collections: [SENTINEL_2],
+    from: new Date(end.getTime() - 120 * day),
+    to: new Date(end.getTime() - SCENE_DAYS * day),
+    maxCloud: 15,
+    limit: 12,
+    signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+  }).catch(() => []);
+  const clearLook = older
+    .filter((scene) => scene.visual && scene.thumbnail)
+    .sort((a, b) => b.datetime.localeCompare(a.datetime))[0] ?? null;
+  return { scenes, clearLook };
+}
+
 /** "Sentinel-2A · 10 m · 19% cloud" */
 export function describeScene(scene: Scene): string {
   const cloud = scene.daily

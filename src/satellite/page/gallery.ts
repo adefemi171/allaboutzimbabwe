@@ -8,8 +8,13 @@ import { drawCloseup } from "./scene-dialog";
 
 type Tab = "all" | "detail" | "weather";
 type Place = { lat: number; lon: number; label: string };
-/** A pass that left a picture. */
-type Shot = MatchedPass & { scene: Scene };
+/** A capture may be available even when no predicted pass matches it. */
+interface Shot {
+  scene: Scene;
+  pass: MatchedPass | null;
+  archived?: boolean;
+  relatedPass?: MatchedPass;
+}
 
 /** Leafing through quickly should not fetch every close-up on the way. */
 const SETTLE_MS = 300;
@@ -22,18 +27,24 @@ const SETTLE_MS = 300;
 const PHONE = "(max-width: 720px)";
 
 export interface GalleryEvents {
-  onOpen(shot: Shot): void;
-  onReplay(shot: Shot): void;
+  onOpen(scene: Scene): void;
+  onReplay(pass: MatchedPass, selectPhoto: boolean): void;
 }
 
-/** The sharpest first, then the clearest, then the latest. Last, what cannot be shown. */
+/** Favor useful ground detail, then regional imagery over heavily clouded scenes. */
 function order(a: Shot, b: Shot): number {
-  const cloud = (shot: Shot) => Math.round((shot.scene.cloudCover ?? 0) / 20);
+  const priority = ({ scene }: Shot) => {
+    if (!scene.thumbnail) return 4;
+    if (scene.daily || scene.cloudCover === null) return 2;
+    if (scene.cloudCover >= 70) return 3;
+    return scene.cloudCover <= 25 ? 0 : 1;
+  };
+  const cloudBand = ({ scene }: Shot) => Math.floor((scene.cloudCover ?? 100) / 15);
   return (
-    Number(!a.scene.thumbnail) - Number(!b.scene.thumbnail) ||
+    priority(a) - priority(b) ||
     a.scene.metres - b.scene.metres ||
-    cloud(a) - cloud(b) ||
-    b.time.localeCompare(a.time)
+    cloudBand(a) - cloudBand(b) ||
+    b.scene.datetime.localeCompare(a.scene.datetime)
   );
 }
 
@@ -78,7 +89,7 @@ export class Gallery {
       "click",
       () => {
         const shot = this.shown[this.index];
-        if (shot) events.onOpen(shot);
+        if (shot) events.onOpen(shot.scene);
       },
       { signal },
     );
@@ -86,7 +97,8 @@ export class Gallery {
       "click",
       () => {
         const shot = this.shown[this.index];
-        if (shot) events.onReplay(shot);
+        if (shot?.pass) events.onReplay(shot.pass, true);
+        else if (shot?.relatedPass) events.onReplay(shot.relatedPass, false);
       },
       { signal },
     );
@@ -107,22 +119,61 @@ export class Gallery {
     return [...this.root.querySelectorAll<T>(`[data-gallery-${name}]`)];
   }
 
-  set(passes: MatchedPass[], place: Place): void {
-    this.shots = passes.filter((pass): pass is Shot => !!pass.scene).sort(order);
+  set(
+    passes: MatchedPass[],
+    place: Place,
+    scenes: Scene[] = [],
+    clearLook: Scene | null = null,
+  ): number {
+    const shotsByScene = new Map<string, Shot>();
+    for (const pass of passes) {
+      if (pass.scene) shotsByScene.set(pass.scene.id, { scene: pass.scene, pass });
+    }
+    for (const scene of scenes) {
+      if (!shotsByScene.has(scene.id) && scene.thumbnail) shotsByScene.set(scene.id, { scene, pass: null });
+    }
+    const recentCount = shotsByScene.size;
+    if (clearLook && !shotsByScene.has(clearLook.id)) {
+      shotsByScene.set(clearLook.id, { scene: clearLook, pass: null, archived: true });
+    }
+    // A capture can show a known satellite without matching a predicted pass.
+    // Offer a replay of that satellite's nearest past pass as a separate action.
+    const pastBySatellite = new Map<number, MatchedPass[]>();
+    for (const pass of passes) {
+      if (pass.upcoming) continue;
+      const past = pastBySatellite.get(pass.noradId);
+      if (past) past.push(pass);
+      else pastBySatellite.set(pass.noradId, [pass]);
+    }
+    for (const shot of shotsByScene.values()) {
+      const { noradId, datetime } = shot.scene;
+      if (shot.pass || noradId === null) continue;
+      const captured = Date.parse(datetime);
+      let closest = Infinity;
+      for (const pass of pastBySatellite.get(noradId) ?? []) {
+        const distance = Math.abs(Date.parse(pass.time) - captured);
+        if (distance >= closest) continue;
+        shot.relatedPass = pass;
+        closest = distance;
+      }
+    }
+    this.shots = [...shotsByScene.values()].sort(order);
     this.place = place;
     this.tab = "all";
     this.index = 0;
     this.render();
+    return recentCount;
   }
 
   /** Turn to the picture of a pass, if it left one. */
   show(pass: MatchedPass): void {
-    let index = this.shown.findIndex((shot) => shot.id === pass.id);
-    if (index < 0 && this.shots.some((shot) => shot.id === pass.id)) {
+    const previous = this.shown[this.index];
+    let index = this.shown.findIndex((shot) => shot.pass?.id === pass.id);
+    if (index < 0 && this.shots.some((shot) => shot.pass?.id === pass.id)) {
       this.tab = "all";
-      index = this.shots.findIndex((shot) => shot.id === pass.id);
+      index = this.shots.findIndex((shot) => shot.pass?.id === pass.id);
     }
-    if (index < 0 || index === this.index) return;
+    if (index < 0 || previous?.pass?.id === pass.id) return;
     this.index = index;
     this.render();
   }
@@ -137,9 +188,13 @@ export class Gallery {
       button.setAttribute("aria-pressed", String(tab === this.tab));
       button.hidden = !this.shots.some((shot) => fits(shot, tab));
     }
+    window.clearTimeout(this.settle);
     const shot = this.shown[this.index];
     if (!shot) return;
-    const { scene } = shot;
+    for (const button of this.all<HTMLButtonElement>("step")) {
+      button.disabled = this.shown.length < 2;
+    }
+    const { scene, pass, archived } = shot;
 
     this.part("count").textContent = `${this.index + 1} / ${this.shown.length}`;
     this.part("name").textContent = `${scene.platform} · ${formatWhen(scene.datetime)}`;
@@ -149,33 +204,53 @@ export class Gallery {
         ? ""
         : scene.cloudCover < 10
           ? "clear"
-          : `${Math.round(scene.cloudCover)}% cloud`;
-    this.part("what").textContent = [`${scene.metres} m`, formatAway(scene.datetime), cloud]
+          : `${Math.round(scene.cloudCover)}% cloud across scene`;
+    this.part("what").textContent = [`${scene.metres} m per pixel`, formatAway(scene.datetime), cloud]
       .filter(Boolean)
       .join(" · ");
+
+    const replay = this.part<HTMLButtonElement>("replay");
+    replay.hidden = !(pass || shot.relatedPass);
+    replay.textContent = pass ? "Replay" : "Replay another pass";
+    replay.title = shot.relatedPass
+      ? `${shot.relatedPass.name} · ${formatWhen(shot.relatedPass.time)}`
+      : "";
 
     const canvas = this.part<HTMLCanvasElement>("canvas");
     const img = this.part<HTMLImageElement>("img");
     const pin = this.part("pin");
     const tag = this.part("tag");
-    canvas.hidden = true;
-    img.hidden = !scene.thumbnail;
-    if (scene.thumbnail) img.src = scene.thumbnail;
-    img.alt = `${this.place.label} seen by ${scene.platform}`;
-    // A daily picture is cut with the place in its middle.
-    pin.hidden = !scene.daily;
+    const placeholder = this.part("placeholder");
+    const open = this.part("open");
+    const label = archived ? "Clear archive view" : scene.daily ? "Regional mosaic" : "Full scene";
+    const detail = scene.visual && (scene.cloudCover ?? 0) < 70 && (!window.matchMedia(PHONE).matches || !scene.thumbnail || archived);
+    canvas.hidden = pin.hidden = img.hidden = true;
     pin.style.left = pin.style.top = "50%";
-    const phone = window.matchMedia(PHONE).matches;
-    tag.textContent = scene.daily
-      ? "240 km across"
-      : phone && scene.visual
-        ? "Whole frame · tap for close-up"
-        : scene.thumbnail
-          ? "Whole frame"
-          : "No preview";
+    img.alt = `${this.place.label} seen by ${scene.platform}`;
+    tag.hidden = true;
+    placeholder.hidden = false;
+    placeholder.textContent = scene.thumbnail || detail ? "Loading imagery…" : "Preview unavailable";
+    open.setAttribute("aria-label", `Open ${scene.platform} imagery of ${this.place.label}`);
 
-    window.clearTimeout(this.settle);
-    if (!scene.visual || phone) return;
+    const preview = () => {
+      if (this.shown[this.index] !== shot || !canvas.hidden || !img.complete) return;
+      const ready = Boolean(img.naturalWidth);
+      img.hidden = !ready;
+      pin.hidden = !ready || !scene.daily;
+      tag.hidden = !ready;
+      tag.textContent = label;
+      placeholder.hidden = ready;
+      placeholder.textContent = "Preview unavailable. Try another image.";
+    };
+    img.onload = img.onerror = preview;
+    if (scene.thumbnail) {
+      img.src = scene.thumbnail;
+      preview();
+    } else {
+      img.removeAttribute("src");
+    }
+
+    if (!detail) return;
     this.settle = window.setTimeout(() => {
       closeup(scene, this.place.lat, this.place.lon)
         .then((found) => {
@@ -183,10 +258,14 @@ export class Gallery {
           drawCloseup(canvas, pin, found);
           canvas.hidden = pin.hidden = false;
           img.hidden = true;
-          tag.textContent = shot === this.shots[0] ? "Closest look" : "8 km across";
+          tag.hidden = false;
+          placeholder.hidden = true;
+          tag.textContent = archived ? "Clear archive view" : `8 km across`;
         })
-        // Outside the frame, or the archive would not answer: the frame stays.
-        .catch(() => {});
+        .catch(() => {
+          if (this.shown[this.index] !== shot || placeholder.hidden) return;
+          placeholder.textContent = "Preview unavailable. Try another image.";
+        });
     }, SETTLE_MS);
   }
 }
